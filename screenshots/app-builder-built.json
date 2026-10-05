@@ -1,0 +1,38 @@
+{
+  "url": "http://127.0.0.1:8081/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Elsewhere",
+      "hasCanvas": false,
+      "bodyTextLen": 594,
+      "bodyTextHash": "45daf3b289b07d483bf659b9ae581c49566d8a2dff0c37c47ad95bd3737d25f2",
+      "bodyTextPrefix": "Elsewhere Washington · District of Columbia · United States Talk",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Elsewhere",
+      "hasCanvas": false,
+      "bodyTextLen": 594,
+      "bodyTextHash": "45daf3b289b07d483bf659b9ae581c49566d8a2dff0c37c47ad95bd3737d25f2",
+      "bodyTextPrefix": "Elsewhere Washington · District of Columbia · United States Talk",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-built.json",
+  "divergesFromBaseline": false,
+  "baselineReasons": []
+}
