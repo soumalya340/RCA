@@ -1,0 +1,8 @@
+{
+  "name": "Elsewhere - Random Chat & Events",
+  "description": "Mobile web app for spontaneous anonymous random matching chat, audio/video calls, and nearby campus/local events discovery and creation.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

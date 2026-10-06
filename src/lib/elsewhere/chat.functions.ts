@@ -10,6 +10,12 @@ function session(selfId: unknown) {
 export const seekLane = createServerFn({ method: "POST" })
   .validator((input: ProfileInput) => {
     const selfId = session(input?.selfId);
+    const scope =
+      input?.scope === "city" || input?.scope === "region" || input?.scope === "country"
+        ? input.scope
+        : "worldwide";
+    const medium =
+      input?.medium === "voice" || input?.medium === "video" ? input.medium : "text";
     return {
       selfId,
       city: cleanText(input.city, 48),
@@ -17,6 +23,8 @@ export const seekLane = createServerFn({ method: "POST" })
       country: cleanText(input.country, 48),
       interests: normalizeTags(input.interests),
       openMatch: Boolean(input.openMatch),
+      scope,
+      medium,
     } satisfies ProfileInput;
   })
   .handler(async ({ data }) => {
@@ -38,18 +46,34 @@ export const leaveQueue = createServerFn({ method: "POST" })
   });
 
 export const pollLane = createServerFn({ method: "POST" })
-  .validator((input: { selfId: string; laneId: string; since: number }) => ({
+  .validator((input: { selfId: string; laneId: string; since: number; typing?: boolean }) => ({
     selfId: session(input?.selfId),
     laneId: session(input?.laneId),
     since: Number.isFinite(input?.since) ? Math.max(0, Math.floor(input.since)) : 0,
+    typing: typeof input?.typing === "boolean" ? input.typing : undefined,
   }))
   .handler(async ({ data }) => {
     try {
       const { pollLane: poll } = await import("./relay.server");
-      return await poll(data.selfId, data.laneId, data.since);
+      return await poll(data.selfId, data.laneId, data.since, data.typing);
     } catch (error) {
       console.error("[elsewhere] poll", error);
       return { ok: false as const, error: "The lane flickered. Still trying." };
+    }
+  });
+
+export const setLaneTyping = createServerFn({ method: "POST" })
+  .validator((input: { selfId: string; laneId: string; typing: boolean }) => ({
+    selfId: session(input?.selfId),
+    laneId: session(input?.laneId),
+    typing: Boolean(input?.typing),
+  }))
+  .handler(async ({ data }) => {
+    try {
+      const { setTypingStatus } = await import("./relay.server");
+      return await setTypingStatus(data.selfId, data.laneId, data.typing);
+    } catch {
+      return { ok: true as const };
     }
   });
 

@@ -4,6 +4,7 @@ export const ID_RE = /^[a-zA-Z0-9_-]{8,40}$/;
 
 export function cleanText(value: unknown, max: number): string {
   if (typeof value !== "string") return "";
+  // eslint-disable-next-line no-control-regex
   return value.replace(/[\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
 }
 

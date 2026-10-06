@@ -25,6 +25,8 @@ export const postGathering = createServerFn({ method: "POST" })
     title: cleanText(input?.title, 80),
     blurb: cleanText(input?.blurb, 280),
     city: cleanText(input?.city, 48),
+    region: cleanText(input?.region, 48),
+    country: cleanText(input?.country, 48),
     place: cleanText(input?.place, 80),
     startsAt: cleanText(input?.startsAt, 40),
     tags: normalizeTags(input?.tags),

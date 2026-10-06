@@ -4,6 +4,7 @@ import type { Place } from "./types";
 function decodeHeader(value: string | null): string {
   if (!value) return "";
   try {
+    // eslint-disable-next-line no-control-regex
     return decodeURIComponent(value).replace(/[\u0000-\u001f]/g, "").trim().slice(0, 48);
   } catch {
     return value.trim().slice(0, 48);

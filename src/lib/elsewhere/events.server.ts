@@ -7,6 +7,8 @@ type EventRow = {
   title: string;
   blurb: string;
   city: string;
+  region: string;
+  country: string;
   place: string;
   starts_at: unknown;
   tags: string;
@@ -21,6 +23,8 @@ const SEEDS: Array<{
   title: string;
   blurb: string;
   city: string;
+  region: string;
+  country: string;
   place: string;
   days: number;
   hour: number;
@@ -33,6 +37,8 @@ const SEEDS: Array<{
     title: "Rooftop listening hour",
     blurb: "One song each. A small speaker, the river, and no lineup.",
     city: "Lisbon",
+    region: "Lisbon",
+    country: "Portugal",
     place: "Miradouro de Santa Catarina",
     days: 1,
     hour: 21,
@@ -45,6 +51,8 @@ const SEEDS: Array<{
     title: "Late film club",
     blurb: "A short, then a walk to argue about the ending.",
     city: "Chicago",
+    region: "Illinois",
+    country: "United States",
     place: "Music Box lounge",
     days: 2,
     hour: 20,
@@ -53,10 +61,40 @@ const SEEDS: Array<{
     going: 9,
   },
   {
+    id: "ev_sf_hack",
+    title: "Mission District side-projects",
+    blurb: "Laptops, espresso, and showing whatever you built this week.",
+    city: "San Francisco",
+    region: "California",
+    country: "United States",
+    place: "Sightglass Coffee",
+    days: 2,
+    hour: 15,
+    tags: "Startups,Music",
+    host: "Elena",
+    going: 16,
+  },
+  {
+    id: "ev_toronto_board",
+    title: "Park chess & board games",
+    blurb: "Casual matches under the trees. Beginners welcome, tea provided.",
+    city: "Toronto",
+    region: "Ontario",
+    country: "Canada",
+    place: "Trinity Bellwoods Park",
+    days: 3,
+    hour: 14,
+    tags: "Games,Night walks",
+    host: "Marcus",
+    going: 12,
+  },
+  {
     id: "ev_osaka_arcade",
     title: "Midnight arcade",
     blurb: "Loser buys the next round of tea. No high scores required.",
     city: "Osaka",
+    region: "Osaka",
+    country: "Japan",
     place: "Nipponbashi",
     days: 3,
     hour: 23,
@@ -65,10 +103,26 @@ const SEEDS: Array<{
     going: 11,
   },
   {
+    id: "ev_mumbai_sunset",
+    title: "Marine Drive walk & chai",
+    blurb: "Breeze, sea view, and conversation as the city lights up.",
+    city: "Mumbai",
+    region: "Maharashtra",
+    country: "India",
+    place: "Nariman Point promenade",
+    days: 2,
+    hour: 18,
+    tags: "Food,Night walks,Music",
+    host: "Priya",
+    going: 20,
+  },
+  {
     id: "ev_cdmx_walk",
     title: "Night market tasting",
     blurb: "Three stalls, one rule: share whatever you order.",
     city: "Mexico City",
+    region: "CDMX",
+    country: "Mexico",
     place: "Mercado Roma",
     days: 2,
     hour: 19,
@@ -81,6 +135,8 @@ const SEEDS: Array<{
     title: "Porch session",
     blurb: "Bring a demo, a question, or just stay for the music.",
     city: "Accra",
+    region: "Greater Accra",
+    country: "Ghana",
     place: "Osu waterfront",
     days: 4,
     hour: 18,
@@ -89,10 +145,26 @@ const SEEDS: Array<{
     going: 7,
   },
   {
+    id: "ev_london_book",
+    title: "Sunday acoustic & reading nook",
+    blurb: "Cozy quiet read, then coffee and book swap.",
+    city: "London",
+    region: "England",
+    country: "United Kingdom",
+    place: "Bloomsbury Square",
+    days: 4,
+    hour: 11,
+    tags: "Books,Art",
+    host: "Sophie",
+    going: 10,
+  },
+  {
     id: "ev_cairo_read",
     title: "After-dark reading",
     blurb: "Ten pages aloud, then the room talks. Any language welcome.",
     city: "Cairo",
+    region: "Cairo",
+    country: "Egypt",
     place: "A shaded courtyard in Zamalek",
     days: 5,
     hour: 20,
@@ -105,6 +177,8 @@ const SEEDS: Array<{
     title: "Cold swim and coffee",
     blurb: "Short dip, long coffee. Towels exist. Heroics do not.",
     city: "Malmö",
+    region: "Skåne",
+    country: "Sweden",
     place: "Ribersborg kallbadhus",
     days: 3,
     hour: 8,
@@ -117,6 +191,8 @@ const SEEDS: Array<{
     title: "Gallery open late",
     blurb: "New work on the walls until midnight. Come without a plan.",
     city: "Berlin",
+    region: "Berlin",
+    country: "Germany",
     place: "Neukölln storefront",
     days: 6,
     hour: 19,
@@ -136,15 +212,17 @@ function atHour(days: number, hour: number) {
 async function ensureBoard(sql: Sql) {
   for (const seed of SEEDS) {
     await sql.query(
-      `insert into ew_events (id, title, blurb, city, place, starts_at, tags, host_label, host_token, base_going)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       on conflict (id) do update set starts_at = excluded.starts_at
+      `insert into ew_events (id, title, blurb, city, region, country, place, starts_at, tags, host_label, host_token, base_going)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       on conflict (id) do update set starts_at = excluded.starts_at, region = excluded.region, country = excluded.country
        where ew_events.starts_at < now() and ew_events.host_token = excluded.host_token`,
       [
         seed.id,
         seed.title,
         seed.blurb,
         seed.city,
+        seed.region,
+        seed.country,
         seed.place,
         atHour(seed.days, seed.hour),
         seed.tags,
@@ -162,6 +240,8 @@ function toEvent(row: EventRow): Omit<EventDTO, "mine"> {
     title: row.title,
     blurb: row.blurb,
     city: row.city,
+    region: row.region || "",
+    country: row.country || "",
     place: row.place,
     startsAt: toIso(row.starts_at),
     tags: splitTags(row.tags),
@@ -177,7 +257,7 @@ export async function listEvents(token: string, hostTokens: string[]): Promise<E
   const sql = await getSql();
   await ensureBoard(sql);
   const rows = await sql.query<EventRow>(
-    `select e.id, e.title, e.blurb, e.city, e.place, e.starts_at, e.tags, e.host_label, e.host_token,
+    `select e.id, e.title, e.blurb, e.city, e.region, e.country, e.place, e.starts_at, e.tags, e.host_label, e.host_token,
             (e.base_going + (select count(*)::int from ew_rsvps r where r.event_id = e.id)) as going_count,
             exists(select 1 from ew_rsvps r where r.event_id = e.id and r.token = $1) as going
      from ew_events e
@@ -198,6 +278,8 @@ export async function createEvent(draft: DraftEvent) {
   const title = cleanText(draft.title, 80);
   const place = cleanText(draft.place, 80);
   const city = cleanText(draft.city, 48);
+  const region = cleanText(draft.region, 48);
+  const country = cleanText(draft.country, 48);
   const blurb = cleanText(draft.blurb, 280);
   const hostLabel = cleanText(draft.hostLabel, 32) || "Anonymous";
   const tags = normalizeTags(draft.tags);
@@ -215,9 +297,9 @@ export async function createEvent(draft: DraftEvent) {
   const hostToken = `h${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
   const sql = await getSql();
   await sql.query(
-    `insert into ew_events (id, title, blurb, city, place, starts_at, tags, host_label, host_token, base_going)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1)`,
-    [id, title, blurb, city, place, when.toISOString(), tags.join(","), hostLabel, hostToken],
+    `insert into ew_events (id, title, blurb, city, region, country, place, starts_at, tags, host_label, host_token, base_going)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1)`,
+    [id, title, blurb, city, region, country, place, when.toISOString(), tags.join(","), hostLabel, hostToken],
   );
   await sql.query(
     `insert into ew_rsvps (event_id, token) values ($1, $2) on conflict do nothing`,

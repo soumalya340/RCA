@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { CalendarDays, MessageSquare, Radio } from "lucide-react";
 import { ChatPane } from "@/components/elsewhere/chat-pane";
 import { EventsPane } from "@/components/elsewhere/events-pane";
 import { Lobby } from "@/components/elsewhere/lobby";
@@ -12,30 +13,52 @@ import {
   seekLane,
   sendLaneMessage,
   setLaneCall,
+  setLaneTyping,
 } from "@/lib/elsewhere/chat.functions";
 import { formatPlace } from "@/lib/elsewhere/format";
 import { hostedReply, pickPersona, type Persona } from "@/lib/elsewhere/hosted";
-import type { CallMode, LaneDTO, Place } from "@/lib/elsewhere/types";
+import type { CallMode, ChatMedium, LaneDTO, LocationScope, Place } from "@/lib/elsewhere/types";
 
-type Line = { id: string; fromSelf: boolean; body: string };
+type Line = { id: string; fromSelf: boolean; body: string; at?: string };
 
-type Search = { place: Place; interests: string[]; openMatch: boolean; started: number };
+type Search = {
+  place: Place;
+  interests: string[];
+  openMatch: boolean;
+  scope: LocationScope;
+  medium: ChatMedium;
+  started: number;
+};
 
 type Phase =
   | { kind: "lobby" }
   | { kind: "search" }
   | { kind: "hosted"; persona: Persona; lines: Line[]; typing: boolean }
-  | { kind: "live"; lane: LaneDTO; lines: Line[]; ended: boolean };
+  | { kind: "live"; lane: LaneDTO; lines: Line[]; ended: boolean; partnerTyping?: boolean };
 
-function mergeLines(current: Line[], incoming: { id: number; fromSelf: boolean; body: string }[]): Line[] {
+function mergeLines(
+  current: Line[],
+  incoming: { id: number; fromSelf: boolean; body: string; at?: string }[],
+): Line[] {
   const map = new Map(current.map((line) => [line.id, line]));
   for (const line of incoming) {
-    map.set(String(line.id), { id: String(line.id), fromSelf: line.fromSelf, body: line.body });
+    map.set(String(line.id), {
+      id: String(line.id),
+      fromSelf: line.fromSelf,
+      body: line.body,
+      at: line.at || new Date().toISOString(),
+    });
   }
   return [...map.values()].sort((a, b) => Number(a.id) - Number(b.id));
 }
 
-function hostedLane(persona: Persona, selfId: string, place: Place, interests: string[]): LaneDTO {
+function hostedLane(
+  persona: Persona,
+  selfId: string,
+  place: Place,
+  interests: string[],
+  medium: ChatMedium = "text",
+): LaneDTO {
   return {
     id: "hosted",
     youAre: "a",
@@ -47,10 +70,11 @@ function hostedLane(persona: Persona, selfId: string, place: Place, interests: s
       country: persona.country,
       interests: persona.interests,
     },
-    youVoice: false,
-    partnerVoice: false,
+    youVoice: medium === "voice",
+    partnerVoice: medium === "voice",
     youVideo: false,
     partnerVideo: false,
+    medium,
   };
 }
 
@@ -66,6 +90,7 @@ export function ElsewhereApp() {
   const searchRef = useRef<Search | null>(null);
   const sinceRef = useRef(0);
   const selfRef = useRef<string | null>(null);
+  const selfTypingRef = useRef(false);
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
   selfRef.current = selfId;
@@ -96,6 +121,7 @@ export function ElsewhereApp() {
               id: String(message.id),
               fromSelf: message.fromSelf,
               body: message.body,
+              at: message.at,
             })),
             ended: false,
           });
@@ -131,6 +157,8 @@ export function ElsewhereApp() {
           country: current.place.country,
           interests: current.interests,
           openMatch: current.openMatch,
+          scope: current.scope,
+          medium: current.medium,
         },
       });
       if (stop) return;
@@ -162,7 +190,9 @@ export function ElsewhereApp() {
     const laneId = liveId;
     let stop = false;
     const tick = async () => {
-      const result = await pollLane({ data: { selfId, laneId, since: sinceRef.current } });
+      const result = await pollLane({
+        data: { selfId, laneId, since: sinceRef.current, typing: selfTypingRef.current },
+      });
       if (stop) return;
       if (!result.ok) {
         setError(result.error);
@@ -174,9 +204,17 @@ export function ElsewhereApp() {
       setPhase((current) => {
         if (current.kind !== "live" || current.lane.id !== laneId) return current;
         const lines = mergeLines(current.lines, result.messages);
-        if (result.status === "live") return { ...current, lane: result.lane, lines, ended: false };
+        if (result.status === "live") {
+          return {
+            ...current,
+            lane: result.lane,
+            lines,
+            ended: false,
+            partnerTyping: Boolean(result.partnerTyping),
+          };
+        }
         saveLane(null);
-        return { ...current, lines, ended: true };
+        return { ...current, lines, ended: true, partnerTyping: false };
       });
     };
     void tick();
@@ -211,16 +249,29 @@ export function ElsewhereApp() {
     return () => window.removeEventListener("pagehide", onHide);
   }, []);
 
-  function startSearch(value: { place: Place; interests: string[]; openMatch: boolean }) {
+  function startSearch(value: {
+    place: Place;
+    interests: string[];
+    openMatch: boolean;
+    scope: LocationScope;
+    medium: ChatMedium;
+  }) {
     if (!selfId) return;
     setError(null);
     const nextPlace = {
       city: value.place.city.trim(),
-      region: value.place.region,
-      country: value.place.country,
+      region: value.place.region.trim(),
+      country: value.place.country.trim(),
     };
     setPlace(nextPlace);
-    searchRef.current = { place: nextPlace, interests: value.interests, openMatch: value.openMatch, started: Date.now() };
+    searchRef.current = {
+      place: nextPlace,
+      interests: value.interests,
+      openMatch: value.openMatch,
+      scope: value.scope,
+      medium: value.medium,
+      started: Date.now(),
+    };
     setPhase({ kind: "search" });
   }
 
@@ -233,7 +284,12 @@ export function ElsewhereApp() {
     const search = searchRef.current;
     if (!search || !selfId) return;
     void leaveQueue({ data: { selfId } });
-    const persona = pickPersona(search.interests);
+    const persona = pickPersona(search.interests, undefined, {
+      city: search.place.city,
+      region: search.place.region,
+      country: search.place.country,
+      scope: search.scope,
+    });
     setPhase({ kind: "hosted", persona, lines: [], typing: true });
     window.setTimeout(() => {
       setPhase((current) => {
@@ -241,19 +297,20 @@ export function ElsewhereApp() {
         return {
           ...current,
           typing: false,
-          lines: [{ id: "hello", fromSelf: false, body: persona.hello }],
+          lines: [{ id: "hello", fromSelf: false, body: persona.hello, at: new Date().toISOString() }],
         };
       });
     }, 700);
   }
 
   function sendHosted(body: string) {
+    const now = new Date().toISOString();
     setPhase((current) => {
       if (current.kind !== "hosted") return current;
       return {
         ...current,
         typing: true,
-        lines: [...current.lines, { id: crypto.randomUUID(), fromSelf: true, body }],
+        lines: [...current.lines, { id: crypto.randomUUID(), fromSelf: true, body, at: now }],
       };
     });
     const persona = phase.kind === "hosted" ? phase.persona : null;
@@ -266,7 +323,7 @@ export function ElsewhereApp() {
         return {
           ...current,
           typing: false,
-          lines: [...current.lines, { id: crypto.randomUUID(), fromSelf: false, body: reply }],
+          lines: [...current.lines, { id: crypto.randomUUID(), fromSelf: false, body: reply, at: new Date().toISOString() }],
         };
       });
     }, 900);
@@ -274,6 +331,7 @@ export function ElsewhereApp() {
 
   async function sendLive(body: string) {
     if (phase.kind !== "live" || !selfId) return;
+    selfTypingRef.current = false;
     const result = await sendLaneMessage({ data: { selfId, laneId: phase.lane.id, body } });
     if (!result.ok) {
       setError(result.error);
@@ -284,6 +342,13 @@ export function ElsewhereApp() {
       if (current.kind !== "live") return current;
       return { ...current, lines: mergeLines(current.lines, [result.message]) };
     });
+  }
+
+  function onTyping(typing: boolean) {
+    selfTypingRef.current = typing;
+    if (phase.kind === "live" && selfId) {
+      void setLaneTyping({ data: { selfId, laneId: phase.lane.id, typing } });
+    }
   }
 
   async function onCall(mode: CallMode) {
@@ -322,7 +387,12 @@ export function ElsewhereApp() {
   function nextLane() {
     if (phase.kind === "hosted") {
       const interests = searchRef.current?.interests ?? [];
-      const persona = pickPersona(interests, phase.persona.id);
+      const persona = pickPersona(interests, phase.persona.id, {
+        city: searchRef.current?.place.city || place.city,
+        region: searchRef.current?.place.region || place.region,
+        country: searchRef.current?.place.country || place.country,
+        scope: searchRef.current?.scope,
+      });
       setPhase({ kind: "hosted", persona, lines: [], typing: true });
       window.setTimeout(() => {
         setPhase((current) => {
@@ -344,6 +414,8 @@ export function ElsewhereApp() {
         place,
         interests: phase.lane.self.interests,
         openMatch: phase.lane.self.interests.length === 0,
+        scope: "worldwide",
+        medium: phase.lane.medium || "text",
         started: Date.now(),
       };
     }
@@ -358,30 +430,53 @@ export function ElsewhereApp() {
     phase.kind === "live"
       ? phase.lane
       : phase.kind === "hosted" && selfId
-        ? hostedLane(phase.persona, selfId, searchRef.current?.place ?? place, searchRef.current?.interests ?? [])
+        ? hostedLane(
+            phase.persona,
+            selfId,
+            searchRef.current?.place ?? place,
+            searchRef.current?.interests ?? [],
+            searchRef.current?.medium ?? "text",
+          )
         : null;
 
   return (
-    <div className="mx-auto flex h-dvh w-full max-w-5xl flex-col px-4">
+    <div className="mx-auto flex h-dvh w-full max-w-5xl flex-col px-3 sm:px-4">
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line py-3">
         <div className="min-w-0">
-          <p className="font-display text-2xl leading-none text-fg">Elsewhere</p>
-          <p className="mt-1 truncate text-xs text-muted">{placeLabel}</p>
+          <div className="flex items-center gap-2">
+            <span className="font-display text-2xl leading-none text-fg">Elsewhere</span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400 border border-emerald-500/20">
+              <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>{people === null ? "…" : `${people} online`}</span>
+            </span>
+          </div>
+          <p className="mt-1 truncate text-xs text-muted flex items-center gap-1">
+            <Radio className="size-3 text-faint shrink-0" />
+            <span>{placeLabel}</span>
+          </p>
         </div>
-        <nav className="flex rounded-sm border border-line p-1" aria-label="Sections">
+
+        {/* Desktop and Tablet top nav */}
+        <nav className="flex rounded-lg border border-line p-1 bg-surface/40" aria-label="Sections">
           <button
             type="button"
-            className={`pressable min-h-11 rounded-xs px-4 text-sm ${tab === "talk" ? "bg-subtle text-fg" : "text-muted"}`}
+            className={`pressable min-h-9 flex items-center gap-1.5 rounded-md px-3 text-xs sm:text-sm font-medium ${
+              tab === "talk" ? "bg-subtle text-fg shadow-xs" : "text-muted hover:text-fg"
+            }`}
             onClick={() => setTab("talk")}
           >
-            Talk
+            <MessageSquare className="size-3.5" />
+            <span>Random Chat</span>
           </button>
           <button
             type="button"
-            className={`pressable min-h-11 rounded-xs px-4 text-sm ${tab === "events" ? "bg-subtle text-fg" : "text-muted"}`}
+            className={`pressable min-h-9 flex items-center gap-1.5 rounded-md px-3 text-xs sm:text-sm font-medium ${
+              tab === "events" ? "bg-subtle text-fg shadow-xs" : "text-muted hover:text-fg"
+            }`}
             onClick={() => setTab("events")}
           >
-            Events
+            <CalendarDays className="size-3.5" />
+            <span>Events</span>
           </button>
         </nav>
       </header>
@@ -396,6 +491,8 @@ export function ElsewhereApp() {
               place={searchRef.current.place}
               interests={searchRef.current.interests}
               openMatch={searchRef.current.openMatch}
+              scope={searchRef.current.scope}
+              medium={searchRef.current.medium}
               waited={waited}
               people={people}
               error={error}
@@ -409,10 +506,11 @@ export function ElsewhereApp() {
               lane={chatLane}
               lines={phase.lines}
               ended={phase.kind === "live" ? phase.ended : false}
-              typing={phase.kind === "hosted" ? phase.typing : false}
+              typing={phase.kind === "hosted" ? phase.typing : Boolean(phase.partnerTyping)}
               hosted={phase.kind === "hosted"}
               error={error}
               onSend={phase.kind === "hosted" ? sendHosted : sendLive}
+              onTyping={onTyping}
               onCall={onCall}
               onNext={nextLane}
               onClose={() => void closeLive()}
@@ -421,6 +519,39 @@ export function ElsewhereApp() {
         </div>
         {tab === "events" && <EventsPane place={place} />}
       </main>
+
+      {/* Mobile Bottom Navigation Bar (hidden during active chat to allow keyboard/composer space) */}
+      {!chatting && (
+        <nav
+          className="sm:hidden shrink-0 border-t border-line bg-surface/90 backdrop-blur-md pb-safe py-2 px-6 flex items-center justify-around"
+          aria-label="Mobile Navigation"
+        >
+          <button
+            type="button"
+            className={`flex flex-col items-center gap-1 min-w-16 py-1 text-xs font-medium pressable ${
+              tab === "talk" ? "text-fg" : "text-muted"
+            }`}
+            onClick={() => setTab("talk")}
+          >
+            <div className={`p-1.5 rounded-full ${tab === "talk" ? "bg-subtle text-fg" : "text-muted"}`}>
+              <MessageSquare className="size-4" />
+            </div>
+            <span>Random Chat</span>
+          </button>
+          <button
+            type="button"
+            className={`flex flex-col items-center gap-1 min-w-16 py-1 text-xs font-medium pressable ${
+              tab === "events" ? "text-fg" : "text-muted"
+            }`}
+            onClick={() => setTab("events")}
+          >
+            <div className={`p-1.5 rounded-full ${tab === "events" ? "bg-subtle text-fg" : "text-muted"}`}>
+              <CalendarDays className="size-4" />
+            </div>
+            <span>Events</span>
+          </button>
+        </nav>
+      )}
     </div>
   );
 }

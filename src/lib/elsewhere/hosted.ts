@@ -171,6 +171,107 @@ export const PERSONAS: Persona[] = [
       "Ask me about the street, a book, or nothing in particular.",
     ],
   },
+  {
+    id: "elena",
+    name: "Elena",
+    city: "San Francisco",
+    region: "California",
+    country: "United States",
+    interests: ["Startups", "Music", "Night walks"],
+    hello: "Elena in San Francisco. Fog is rolling over Twin Peaks and my tea is cold.",
+    topics: {
+      Startups: [
+        "Everyone here talks about what they're building. Are you working on any project lately?",
+        "Do you prefer tinkering with ideas late at night or early in the morning?",
+      ],
+      Music: [
+        "I've got an indie synth playlist on loop. What's your focus music?",
+      ],
+      "Night walks": [
+        "Steep hills mean great views at 2am. Do you like walking at night in {city}?",
+      ],
+    },
+    fallback: [
+      "What's happening in {city} right now?",
+      "Tell me one thing you're excited about this month.",
+      "Got any good recommendations?",
+    ],
+  },
+  {
+    id: "marcus",
+    name: "Marcus",
+    city: "Toronto",
+    region: "Ontario",
+    country: "Canada",
+    interests: ["Sports", "Film", "Food"],
+    hello: "Marcus in Toronto. Streetcar just rattled past my balcony and winter is in the air.",
+    topics: {
+      Sports: [
+        "Are you following any games this season, or do you prefer playing outdoors?",
+      ],
+      Film: [
+        "Saw an indie thriller yesterday. Do you prefer light comedies or deep plots?",
+      ],
+      Food: [
+        "Toronto has every food in the world within four blocks. What's the best bite in {city}?",
+      ],
+    },
+    fallback: [
+      "How's the weather where you're at?",
+      "What kind of week are you having in {city}?",
+      "I'm all ears.",
+    ],
+  },
+  {
+    id: "priya",
+    name: "Priya",
+    city: "Mumbai",
+    region: "Maharashtra",
+    country: "India",
+    interests: ["Food", "Music", "Startups"],
+    hello: "Priya from Mumbai. Marine Drive sea breeze is great tonight and street chai is hot.",
+    topics: {
+      Food: [
+        "Street food here is legendary. What's the comfort dish you swear by in {city}?",
+      ],
+      Music: [
+        "Bollywood melodies or indie acoustic? I switch between both depending on my mood.",
+      ],
+      Startups: [
+        "Mumbai hustle never stops. What drives you in your daily work or studies?",
+      ],
+    },
+    fallback: [
+      "Tell me what an ordinary evening in {city} looks like.",
+      "What's one song you think everyone should listen to at least once?",
+      "What are you up to right now?",
+    ],
+  },
+  {
+    id: "sophie",
+    name: "Sophie",
+    city: "London",
+    region: "England",
+    country: "United Kingdom",
+    interests: ["Art", "Books", "Travel"],
+    hello: "Sophie in London. Rain against the glass, reading by a warm lamp.",
+    topics: {
+      Art: [
+        "Spent an afternoon at the Tate Modern. Do you visit galleries often in {city}?",
+      ],
+      Books: [
+        "I'm rereading a classic mystery. Any book you find yourself returning to?",
+      ],
+      Travel: [
+        "Where is the furthest place from {city} that you've ever traveled to?",
+      ],
+    },
+    fallback: [
+      "What's the vibe in {city} tonight?",
+      "I love hearing about everyday life in different cities. What's yours like?",
+      "Ask me anything you like.",
+    ],
+  },
 ];
 
 function pick(lines: string[], salt: string): string {
@@ -180,15 +281,43 @@ function pick(lines: string[], salt: string): string {
   return lines[h % lines.length] ?? lines[0];
 }
 
-export function pickPersona(interests: string[], avoidId?: string): Persona {
+export function pickPersona(
+  interests: string[],
+  avoidId?: string,
+  location?: { city?: string; region?: string; country?: string; scope?: string },
+): Persona {
   const wanted = new Set(interests.map((tag) => tag.toLowerCase()));
   const pool = PERSONAS.filter((persona) => persona.id !== avoidId);
-  const ranked = (pool.length > 0 ? pool : PERSONAS).map((persona) => ({
-    persona,
-    score: persona.interests.reduce((sum, tag) => sum + (wanted.has(tag.toLowerCase()) ? 1 : 0), 0),
-  }));
+
+  const targetCity = (location?.city || "").toLowerCase().trim();
+  const targetRegion = (location?.region || "").toLowerCase().trim();
+  const targetCountry = (location?.country || "").toLowerCase().trim();
+  const scope = location?.scope || "worldwide";
+
+  const ranked = (pool.length > 0 ? pool : PERSONAS).map((persona) => {
+    let score = persona.interests.reduce(
+      (sum, tag) => sum + (wanted.has(tag.toLowerCase()) ? 2 : 0),
+      0,
+    );
+
+    const sameCity = targetCity && persona.city.toLowerCase() === targetCity;
+    const sameRegion = targetRegion && persona.region.toLowerCase() === targetRegion;
+    const sameCountry = targetCountry && persona.country.toLowerCase() === targetCountry;
+
+    if (sameCity) score += 5;
+    if (sameRegion) score += 3;
+    if (sameCountry) score += 2;
+
+    if (scope === "city" && !sameCity) score -= 10;
+    if (scope === "region" && !sameRegion && !sameCity) score -= 10;
+    if (scope === "country" && !sameCountry && !sameRegion && !sameCity) score -= 10;
+
+    return { persona, score };
+  });
+
   ranked.sort((a, b) => b.score - a.score);
-  const top = ranked.filter((item) => item.score === ranked[0].score);
+  const topScore = ranked[0]?.score ?? 0;
+  const top = ranked.filter((item) => item.score >= topScore - 1);
   const index = Math.floor(Math.random() * top.length);
   return top[index]?.persona ?? PERSONAS[0];
 }

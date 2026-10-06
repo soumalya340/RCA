@@ -18,6 +18,8 @@ type WaiterRow = {
   region: string;
   country: string;
   open_match: unknown;
+  scope?: string;
+  medium?: string;
 };
 
 type LaneRow = {
@@ -36,6 +38,7 @@ type LaneRow = {
   b_voice: unknown;
   a_video: unknown;
   b_video: unknown;
+  medium?: string;
   partner_stale: unknown;
   lane_mature: unknown;
 };
@@ -65,6 +68,7 @@ function toLane(row: LaneRow, selfId: string): LaneDTO {
     partnerVoice: youAre === "a" ? asBool(row.b_voice) : asBool(row.a_voice),
     youVideo: youAre === "a" ? asBool(row.a_video) : asBool(row.b_video),
     partnerVideo: youAre === "a" ? asBool(row.b_video) : asBool(row.a_video),
+    medium: row.medium === "voice" || row.medium === "video" ? row.medium : "text",
   };
 }
 
@@ -96,7 +100,7 @@ async function findLane(sql: Sql, selfId: string): Promise<LaneDTO | null> {
     `select id, a_id, b_id,
             a_city, a_region, a_country, a_interests,
             b_city, b_region, b_country, b_interests,
-            a_voice, b_voice, a_video, b_video,
+            a_voice, b_voice, a_video, b_video, medium,
             false as partner_stale,
             false as lane_mature
      from ew_lanes
@@ -109,9 +113,50 @@ async function findLane(sql: Sql, selfId: string): Promise<LaneDTO | null> {
   return row ? toLane(row, selfId) : null;
 }
 
-function compatible(meOpen: boolean, meTags: string, themOpen: boolean, themTags: string) {
-  if (meOpen || themOpen || !meTags || !themTags) return true;
-  return overlaps(meTags, themTags);
+function matchScore(
+  self: Place & { interests: string; scope: string; medium: string; openMatch: boolean },
+  cand: WaiterRow,
+): number {
+  const meOpen = self.openMatch || !self.interests;
+  const themOpen = asBool(cand.open_match) || !cand.interests;
+  const candScope = cand.scope || "worldwide";
+  const myScope = self.scope || "worldwide";
+
+  const myCity = (self.city || "").toLowerCase().trim();
+  const candCity = (cand.city || "").toLowerCase().trim();
+  const myRegion = (self.region || "").toLowerCase().trim();
+  const candRegion = (cand.region || "").toLowerCase().trim();
+  const myCountry = (self.country || "").toLowerCase().trim();
+  const candCountry = (cand.country || "").toLowerCase().trim();
+
+  const sameCity = Boolean(myCity && candCity && myCity === candCity);
+  const sameRegion = Boolean(myRegion && candRegion && myRegion === candRegion);
+  const sameCountry = Boolean(myCountry && candCountry && myCountry === candCountry);
+
+  // Check strict location constraint requested by either side
+  if (myScope === "city" && !sameCity) return -1;
+  if (myScope === "region" && !sameRegion && !sameCity) return -1;
+  if (myScope === "country" && !sameCountry && !sameRegion && !sameCity) return -1;
+
+  if (candScope === "city" && !sameCity) return -1;
+  if (candScope === "region" && !sameRegion && !sameCity) return -1;
+  if (candScope === "country" && !sameCountry && !sameRegion && !sameCity) return -1;
+
+  // Check interest compatibility if neither opted into open match
+  const tagOverlap = overlaps(self.interests, cand.interests);
+  if (!meOpen && !themOpen && !tagOverlap) {
+    return -1;
+  }
+
+  // Weight and rank
+  let score = 10;
+  if (tagOverlap) score += 50;
+  if (self.medium && cand.medium && self.medium === cand.medium) score += 40;
+  if (sameCity) score += 60;
+  else if (sameRegion) score += 35;
+  else if (sameCountry) score += 15;
+
+  return score;
 }
 
 function pairLaneId(a: string, b: string) {
@@ -135,11 +180,16 @@ export async function seek(input: ProfileInput): Promise<SeekResult> {
 
   const tags = normalizeTags(input.interests).join(",");
   const openMatch = input.openMatch || tags.length === 0;
-  const self: Place & { interests: string } = {
+  const scope = input.scope || "worldwide";
+  const medium = input.medium || "text";
+  const self: Place & { interests: string; scope: string; medium: string; openMatch: boolean } = {
     city: cleanText(input.city, 48),
     region: cleanText(input.region, 48),
     country: cleanText(input.country, 48),
     interests: tags,
+    scope,
+    medium,
+    openMatch,
   };
 
   const already = await findLane(sql, input.selfId);
@@ -149,27 +199,28 @@ export async function seek(input: ProfileInput): Promise<SeekResult> {
   }
 
   const candidates = await sql.query<WaiterRow>(
-    `select id, interests, city, region, country, open_match
+    `select id, interests, city, region, country, open_match, scope, medium
      from ew_waiters
      where id <> $1
        and claimed_by is null
        and heartbeat_at > now() - interval '40 seconds'
      order by heartbeat_at desc
-     limit 25`,
+     limit 40`,
     [input.selfId],
   );
 
-  const ranked = candidates
-    .filter((row) => compatible(openMatch, tags, asBool(row.open_match), row.interests))
-    .sort((a, b) => Number(overlaps(tags, b.interests)) - Number(overlaps(tags, a.interests)));
+  const scoredCandidates = candidates
+    .map((candidate) => ({ candidate, score: matchScore(self, candidate) }))
+    .filter((item) => item.score >= 0)
+    .sort((a, b) => b.score - a.score);
 
   let partner: WaiterRow | null = null;
-  for (const candidate of ranked) {
+  for (const { candidate } of scoredCandidates) {
     const claimed = await sql.query<WaiterRow>(
       `update ew_waiters
        set claimed_by = $1
        where id = $2 and claimed_by is null and heartbeat_at > now() - interval '40 seconds'
-       returning id, interests, city, region, country, open_match`,
+       returning id, interests, city, region, country, open_match, scope, medium`,
       [input.selfId, candidate.id],
     );
     if (claimed[0]) {
@@ -183,15 +234,19 @@ export async function seek(input: ProfileInput): Promise<SeekResult> {
     const aProfile = aId === input.selfId ? self : partner;
     const bProfile = bId === input.selfId ? self : partner;
     const laneId = pairLaneId(input.selfId, partner.id);
+    const laneMedium = medium === "voice" || partner.medium === "voice" ? "voice" : medium;
+    const autoVoice = laneMedium === "voice";
     await sql.query(
       `insert into ew_lanes (
          id, a_id, b_id,
          a_city, a_region, a_country, a_interests,
-         b_city, b_region, b_country, b_interests
+         b_city, b_region, b_country, b_interests,
+         a_voice, b_voice, a_video, b_video, medium
        ) values (
          $1, $2, $3,
          $4, $5, $6, $7,
-         $8, $9, $10, $11
+         $8, $9, $10, $11,
+         $12, $12, false, false, $13
        )
        on conflict (id) do nothing`,
       [
@@ -206,6 +261,8 @@ export async function seek(input: ProfileInput): Promise<SeekResult> {
         bProfile.region,
         bProfile.country,
         bProfile.interests,
+        autoVoice,
+        laneMedium,
       ],
     );
     await sql.query(`delete from ew_waiters where id = $1 or id = $2`, [input.selfId, partner.id]);
@@ -221,21 +278,23 @@ export async function seek(input: ProfileInput): Promise<SeekResult> {
   }
 
   await sql.query(
-    `insert into ew_waiters (id, interests, city, region, country, open_match, claimed_by, heartbeat_at)
-     values ($1, $2, $3, $4, $5, $6, null, now())
+    `insert into ew_waiters (id, interests, city, region, country, open_match, scope, medium, claimed_by, heartbeat_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, null, now())
      on conflict (id) do update set
        interests = excluded.interests,
        city = excluded.city,
        region = excluded.region,
        country = excluded.country,
        open_match = excluded.open_match,
+       scope = excluded.scope,
+       medium = excluded.medium,
        heartbeat_at = now(),
        claimed_by = case
          when ew_waiters.claimed_by is not null and ew_waiters.claimed_by <> excluded.id
            then ew_waiters.claimed_by
          else null
        end`,
-    [input.selfId, tags, self.city, self.region, self.country, openMatch],
+    [input.selfId, tags, self.city, self.region, self.country, openMatch, scope, medium],
   );
 
   const afterUpsert = await findLane(sql, input.selfId);
@@ -262,6 +321,7 @@ async function closeLane(sql: Sql, laneId: string, selfId: string) {
     [laneId, selfId],
   );
   if (closed.length > 0) {
+    typingRegistry.delete(laneId);
     await sql.query(`delete from ew_messages where lane_id = $1`, [laneId]);
   }
 }
@@ -280,8 +340,49 @@ export async function dropAway(selfId: string) {
 
 type PollRow = LaneRow;
 
-export async function pollLane(selfId: string, laneId: string, since: number): Promise<PollResult> {
+const typingRegistry = new Map<string, Map<string, number>>();
+
+export function setTyping(selfId: string, laneId: string, typing: boolean) {
+  if (!ID_RE.test(selfId) || !ID_RE.test(laneId)) return;
+  let map = typingRegistry.get(laneId);
+  if (!map) {
+    map = new Map<string, number>();
+    typingRegistry.set(laneId, map);
+  }
+  if (typing) {
+    map.set(selfId, Date.now());
+  } else {
+    map.delete(selfId);
+  }
+}
+
+export function isPartnerTyping(selfId: string, laneId: string, partnerId: string): boolean {
+  const map = typingRegistry.get(laneId);
+  if (!map) return false;
+  const lastTime = map.get(partnerId);
+  if (!lastTime) return false;
+  if (Date.now() - lastTime > 3500) {
+    map.delete(partnerId);
+    return false;
+  }
+  return true;
+}
+
+export async function setTypingStatus(selfId: string, laneId: string, typing: boolean) {
+  setTyping(selfId, laneId, typing);
+  return { ok: true as const };
+}
+
+export async function pollLane(
+  selfId: string,
+  laneId: string,
+  since: number,
+  typing?: boolean,
+): Promise<PollResult> {
   if (!ID_RE.test(selfId) || !ID_RE.test(laneId)) return { ok: false, error: "Invalid lane." };
+  if (typeof typing === "boolean") {
+    setTyping(selfId, laneId, typing);
+  }
   const sql = await getSql();
   if (Math.random() < 0.05) await prune(sql);
 
@@ -293,7 +394,7 @@ export async function pollLane(selfId: string, laneId: string, since: number): P
      returning id, a_id, b_id,
        a_city, a_region, a_country, a_interests,
        b_city, b_region, b_country, b_interests,
-       a_voice, b_voice, a_video, b_video,
+       a_voice, b_voice, a_video, b_video, medium,
        (case when a_id = $2 then b_seen else a_seen end) < now() - make_interval(secs => $3) as partner_stale,
        created_at < now() - make_interval(secs => $3) as lane_mature`,
     [laneId, selfId, STALE_SECONDS],
@@ -311,8 +412,10 @@ export async function pollLane(selfId: string, laneId: string, since: number): P
     return { ok: true, status: "ended", messages };
   }
 
+  const partnerId = row.a_id === selfId ? row.b_id : row.a_id;
+  const partnerTyping = isPartnerTyping(selfId, laneId, partnerId);
   const messages = await readMessages(sql, laneId, selfId, since);
-  return { ok: true, status: "live", lane: toLane(row, selfId), messages };
+  return { ok: true, status: "live", lane: toLane(row, selfId), messages, partnerTyping };
 }
 
 async function readMessages(sql: Sql, laneId: string, selfId: string, since: number): Promise<ChatMessage[]> {
@@ -351,6 +454,7 @@ export async function sendMessage(selfId: string, laneId: string, body: string) 
     [laneId, selfId, text],
   );
   const row = inserted[0];
+  setTyping(selfId, laneId, false);
   return {
     ok: true as const,
     message: {

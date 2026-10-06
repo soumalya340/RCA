@@ -3,18 +3,18 @@ import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import appCss from "../styles.css?url";
 
-const APP_NAME = "Elsewhere";
+const APP_NAME = "Elsewhere - Random Chat & Events";
 
 export const Route = createRootRoute({
   head: () => ({
     meta: [
       { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
+      { name: "viewport", content: "width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" },
       { title: APP_NAME },
       {
         name: "description",
         content:
-          "Talk to someone in another city, on text or video, and find a gathering nearby.",
+          "Mobile web app for spontaneous anonymous random matching chat, audio/video calls, and nearby campus/local events discovery and creation.",
       },
       { name: "theme-color", content: "#0c0d0f" },
     ],

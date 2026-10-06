@@ -4,6 +4,9 @@ export type Place = {
   country: string;
 };
 
+export type LocationScope = "city" | "region" | "country" | "worldwide";
+export type ChatMedium = "text" | "voice" | "video";
+
 export type Person = Place & {
   id: string;
   interests: string[];
@@ -13,6 +16,8 @@ export type ProfileInput = Place & {
   selfId: string;
   interests: string[];
   openMatch: boolean;
+  scope?: LocationScope;
+  medium?: ChatMedium;
 };
 
 export type CallMode = "off" | "voice" | "video";
@@ -26,6 +31,7 @@ export type LaneDTO = {
   partnerVoice: boolean;
   youVideo: boolean;
   partnerVideo: boolean;
+  medium?: ChatMedium;
 };
 
 export type ChatMessage = {
@@ -41,7 +47,7 @@ export type SeekResult =
   | { ok: false; error: string };
 
 export type PollResult =
-  | { ok: true; status: "live"; lane: LaneDTO; messages: ChatMessage[] }
+  | { ok: true; status: "live"; lane: LaneDTO; messages: ChatMessage[]; partnerTyping?: boolean }
   | { ok: true; status: "ended" | "missing"; messages: ChatMessage[] }
   | { ok: false; error: string };
 
@@ -50,6 +56,8 @@ export type EventDTO = {
   title: string;
   blurb: string;
   city: string;
+  region?: string;
+  country?: string;
   place: string;
   startsAt: string;
   tags: string[];
@@ -63,6 +71,8 @@ export type DraftEvent = {
   title: string;
   blurb: string;
   city: string;
+  region?: string;
+  country?: string;
   place: string;
   startsAt: string;
   tags: string[];
